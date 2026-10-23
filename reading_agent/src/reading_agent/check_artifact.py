@@ -21,9 +21,10 @@ CHECKS = [("reader", "all", None, "agent_read_all"), ("reader", "blend", None, "
 BUDGET_CHECKS = [("gain_content", "gainB_content"), ("gain_meta", "gainB_meta")]
 
 
-def check(tag, run_id, rows=300, budgets=(0.1, 0.5), tolerance=1e-4):
+def check(tag, run_id, rows=300, budgets=(0.1, 0.5), tolerance=1e-4, root=None):
+    """`root` overrides the local artifact directory, e.g. a run downloaded from the Hub."""
     archive = np.load(RESULTS / "preds" / tag / f"{run_id}.npz")
-    root = RESULTS / "models" / tag / run_id
+    root = Path(root) if root else RESULTS / "models" / tag / run_id
     dataset = run_id.split("_f")[0]
     idx = archive["te_idx"][:rows]
     with tempfile.TemporaryDirectory() as tmp:
@@ -54,8 +55,17 @@ def main(argv=None):
     ap.add_argument("--tag", default="paper_v2")
     ap.add_argument("--run_id", required=True, help="e.g. MUL_TEXT_WOMEN_CLOTHING_REVIEW_f0_1791988577_1772912b")
     ap.add_argument("--rows", type=int, default=300)
+    ap.add_argument("--repo", help="check the copy published in this Hugging Face repo instead of the local one")
     args = ap.parse_args(argv)
-    failures = check(args.tag, args.run_id, args.rows)
+    root = None
+    if args.repo:
+        from .hub import fetch
+        dataset, rest = args.run_id.split("_f", 1)
+        root = fetch(args.repo, dataset, int(rest.split("_")[0]))
+        if root.name != args.run_id:
+            raise SystemExit(f"Hub run {root.name} is not {args.run_id}")
+        print(f"checking Hub copy {root}")
+    failures = check(args.tag, args.run_id, args.rows, root=root)
     print("all checks passed" if not failures else f"mismatches: {failures}")
     raise SystemExit(1 if failures else 0)
 

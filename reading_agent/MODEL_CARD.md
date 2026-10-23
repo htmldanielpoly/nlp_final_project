@@ -14,8 +14,8 @@ base_model: intfloat/e5-small-v2
 
 Trained weights for *Reading What Matters: Table-Conditioned Selective Text Reading
 for Text-Tabular Prediction* (NLP 097215 final project, Track 1, Technion, 2026).
-Code: <https://github.com/htmldanielpoly/nlp_final_project>; the exact source that
-produced these weights is also in this repo under `code/`.
+Code: <https://github.com/htmldanielpoly/nlp_final_project> (commit `ba1ab69` or later);
+the source snapshot uploaded with these weights is in this repo under `code/`.
 
 Each row's free-text fields are split into sentence items and embedded with the
 frozen `intfloat/e5-small-v2` encoder (revision `ffb93f3bd4047442299a41ebb6fa998a38507c52`).
@@ -77,8 +77,11 @@ python -m reading_agent.sweep --tag paper_v2 --folds 0,1,2,3,4 -- \
 
 Data comes from the MulTaBench Hugging Face datasets. The runs did not pin a dataset
 revision on the command line; each run's resolved revision and train/test fingerprints
-are recorded in `index.json` and its manifests. Training ran on CPU; GPU or
-different thread counts give numerically close but not bit-identical weights.
+are recorded in `index.json` and its manifests. **The MulTaBench datasets have been
+updated since these runs**, so reproduce a run with its recorded revision, e.g.
+`python -m reading_agent.run --dataset <DATASET> --fold <k> --data_revision <data_revision from index.json>`
+plus the recipe flags above. Training ran on CPU; GPU or different thread counts give
+numerically close but not bit-identical weights.
 
 ## Evaluation
 

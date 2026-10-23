@@ -27,6 +27,11 @@ python -m reading_agent.paper_assets --tag paper_v2
 The MulTaBench leaderboard references used by the paper are bundled in
 `reference/multabench_leaderboard_text/` (source commit in its `SOURCE.md`).
 
+**Data versions.** The MulTaBench Hugging Face datasets were updated after the
+`paper_v2` runs. To reproduce a run on identical rows, pass the dataset revision it
+recorded (`data_revision` in the Hub `index.json` or in each run's manifest), e.g.
+`python -m reading_agent.run --dataset <DATASET> --fold <k> --data_revision <revision> --protocol paper --skip soft,hybrid --lams=-1 --epochs 100 --patience 15`.
+
 ## Install and verify
 
 Python 3.11 or later is required. The project dependencies are pinned by `uv.lock`;
