@@ -1,0 +1,14 @@
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+ & \multicolumn{3}{c}{Classification (AUROC)} & \multicolumn{3}{c}{Regression ($R^2$)} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+ & without & with & $\Delta$ (W/$n$) & without & with & $\Delta$ (W/$n$) \\
+\midrule
+Reader, table only & 0.753 & 0.778 & +0.025 (9/10)$^{*}$ & 0.430 & 0.467 & +0.037 (8/10)$^{*}$ \\
+Reader, read all & 0.889 & 0.887 & $-$0.002 (3/10) & 0.671 & 0.645 & $-$0.026 (2/10) \\
+gain $-$ random, content @10\% & +0.028 & +0.017 & $-$0.011 (1/10)$^{*}$ & +0.051 & +0.064 & +0.013 (8/10) \\
+gain $-$ random, content @25\% & +0.023 & +0.017 & $-$0.006 (1/10)$^{*}$ & +0.054 & +0.065 & +0.010 (4/10) \\
+gain $-$ random, metadata @10\% & +0.016 & +0.009 & $-$0.007 (1/10)$^{*}$ & +0.034 & +0.028 & $-$0.006 (5/10) \\
+gain $-$ random, metadata @25\% & +0.018 & +0.015 & $-$0.002 (3/10) & +0.040 & +0.023 & $-$0.017 (2/10)$^{*}$ \\
+\bottomrule
+\end{tabular}

@@ -1,0 +1,24 @@
+# Course material and internal review notes (not part of the submission repo)
+nlp_final_project_instructions.pdf
+review/
+
+# Large experiment outputs: weights are on Hugging Face, see reading_agent/MODEL_CARD.md
+reading_agent/results/
+reading_agent/logs/
+reading_agent/catboost_info/
+
+# Python / environments
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.venv
+
+# LaTeX build by-products
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.bbl
+paper/*.blg

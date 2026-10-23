@@ -1,0 +1,263 @@
+\documentclass{article}
+% NeurIPS template; "preprint" removes line numbers and the anonymous-submission banner.
+\usepackage[preprint]{neurips_2025}
+\makeatletter\renewcommand{\@noticestring}{NLP 097215 Final Project (Track 1), Technion, 2026.
+Code: \url{https://github.com/htmldanielpoly/nlp_final_project}; weights: \url{https://huggingface.co/htmldaniel/reading-agent-multabench}.}\makeatother
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts,amsmath,amssymb}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc}
+
+\input{generated/numbers.tex}
+% written by `python -m reading_agent.controls_report --tag controls_v2 --fieldmeta_tag fieldmeta_v1 --out ../paper/generated`
+\IfFileExists{generated/controls.tex}{\input{generated/controls.tex}}{}
+\newcommand{\htab}{h_{\mathrm{tab}}}
+\setlength{\textfloatsep}{10pt plus 2pt minus 4pt}
+\setlength{\floatsep}{8pt plus 2pt minus 2pt}
+
+\title{Reading What Matters: Table-Conditioned Selective\\Text Reading for Text-Tabular Prediction}
+
+\author{Daniel Polyanovsky\\Technion -- Israel Institute of Technology}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Text-tabular models encode \emph{every} text field of a row, although the structured columns often already determine the prediction and only some rows need some of their text.
+We propose a \emph{reading agent}: a table encoder initialises a recurrent \emph{anytime} reader that consumes frozen-E5 sentence items one at a time and can predict after any number of reads, and an \emph{expected-gain head}, adapted from dynamic feature selection, reads greedily while the predicted loss reduction exceeds a cost $\lambda$.
+On all 20 text datasets of MulTaBench (five splits each), learned reading significantly beats a random reader with the same per-row budget at every budget we test, e.g.\ by \gainContentTenClsDelta{} AUROC and \gainContentTenRegDelta{} $R^2$ at a nominal 10\% of the retained text items.
+For full-budget accuracy, a validation-tuned blend of the reader with a CatBoost Joint-Frozen model significantly improves on CatBoost Joint Frozen (\blendVsLocalCBClsDelta{} AUROC, \blendVsLocalCBRegDelta{} $R^2$) but does not reach the Joint TAR baselines.
+We report this gap, a negative result for imitation learning, and where adaptive reading does and does not help.
+\end{abstract}
+
+%======================================================================
+\section{Introduction}
+
+In text-tabular learning, a row combines numerical and categorical columns with free-text fields such as reviews or job descriptions~\cite{arazi2026multabench}.
+Standard practice embeds each field with a pretrained encoder such as E5~\cite{wang2022e5} and trains a tabular learner on the result (\emph{Joint Frozen}), or fine-tunes the encoder on the target (\emph{Joint TAR})~\cite{arazi2025tabstar,arazi2026multabench}.
+Both treat all text as equally necessary for every row.
+Human analysts read differently: if a wine's price and region already pin down its grade, the review is worth reading only when the table leaves the answer ambiguous, and then one sentence may suffice.
+We turn this into an algorithm: the structured part of a row initialises a recurrent reader, which acquires text one \emph{item} (a field-tagged sentence chunk) at a time, choosing the item with the highest predicted loss reduction, until that gain no longer pays for the reading cost.
+
+\paragraph{Contributions.}
+(i)~A table-conditioned anytime reader for text-tabular rows, trained with random reading orders so it is valid after any subset of reads.
+(ii)~A reading policy, label-free at inference, that regresses observed one-step loss reductions, in the spirit of DIME~\cite{gadgil2024dime}, in two access modes: \emph{content} keys (routing over already-embedded text) and \emph{metadata} keys (field and position only, so unread content is not inspected for selection).
+(iii)~An evaluation on all 20 MulTaBench text datasets with paired local baselines and dataset-level statistics.
+(iv)~Analyses of where adaptive reading helps, and a negative result for imitating a label oracle.
+
+%======================================================================
+\section{Related Work}
+
+\textbf{Text-tabular learning.}
+MulTaBench~\cite{arazi2026multabench} curates datasets on which text and structure are jointly needed and target-aware representations help.
+It evaluates CatBoost~\cite{prokhorenkova2018catboost}, LightGBM~\cite{ke2017lightgbm}, TabM~\cite{gorishniy2024tabm} and TabPFN~\cite{hollmann2025tabpfn,grinsztajn2025tabpfn25} with frozen or LoRA-tuned~\cite{hu2022lora} E5 embeddings.
+TabSTAR~\cite{arazi2025tabstar} unfreezes the text encoder inside a tabular foundation model, and CARTE~\cite{kim2024carte} embeds column names and strings for transfer.
+Shi et al.~\cite{shi2021multimodal} show that ensembling neural text models with tabular learners is strong; our blend follows that practice and is not claimed as novel.
+\textbf{Dynamic feature selection.}
+Active feature acquisition chooses which features to observe per instance~\cite{shim2018afa}.
+Covert et al.~\cite{covert2023dfs} learn greedy information-maximising policies without RL, and DIME~\cite{gadgil2024dime} regresses the reduction in prediction loss and stops at a threshold.
+Our gain head applies DIME's estimator to field-tagged text chunks, with a table-derived prior state.
+\textbf{Adaptive reading.}
+LSTM-Jump~\cite{yu2017skim} and Skim-RNN~\cite{seo2018skimrnn} learn to skip or skim tokens of one document, and adaptive computation time~\cite{graves2016act} learns how many recurrent steps to spend; we select among a tabular row's fields and chunks, conditioned on its columns.
+
+%======================================================================
+\section{Method}
+
+\begin{figure}[t]
+\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[node distance=4mm and 6mm,
+  bx/.style={draw, rounded corners=2pt, thick, align=center, minimum height=7mm, inner sep=3pt, font=\small},
+  tb/.style={bx, draw=blue!60!black, fill=blue!8},
+  tx/.style={bx, draw=orange!70!black, fill=orange!10},
+  rn/.style={bx, draw=green!45!black, fill=green!10, minimum width=10mm},
+  hd/.style={bx, draw=violet!70!black, fill=violet!8},
+  fz/.style={bx, draw=gray, fill=gray!12, dashed},
+  ar/.style={-{Stealth[length=2mm]}, thick}]
+  \node[tb] (row) {num.\,+\,cat.\ columns};
+  \node[tb, right=of row] (enc) {table encoder};
+  \node[rn, right=22mm of enc] (h0) {$h_0$};
+  \node[rn, right=9mm of h0] (h1) {$h_1$};
+  \node[rn, right=9mm of h1] (h2) {$h_2$};
+  \node[font=\small, right=4mm of h2] (dots) {$\cdots$};
+  \node[hd, right=4mm of dots] (stop) {STOP if\\$\max_i \hat g_i<\lambda$};
+  \foreach \t in {0,1,2} { \node[hd, above=4mm of h\t] (y\t) {$\hat y_\t$}; \draw[ar] (h\t) -- (y\t); }
+  \draw[ar] (row) -- (enc); \draw[ar] (enc) -- node[above, font=\scriptsize]{$\tanh(W_0\htab)$} (h0);
+  \draw[ar] (h0) -- (h1); \draw[ar] (h1) -- (h2); \draw[ar] (h2) -- (dots); \draw[ar] (dots) -- (stop);
+  \node[tx, below=9mm of row] (txt) {text fields};
+  \node[fz, right=of txt] (e5) {chunk $\to$ frozen E5};
+  \node[tx, right=8mm of e5, minimum width=40mm] (bank) {item bank $c_1,\dots,c_K$ (field, position, embedding)};
+  \node[hd, right=6mm of bank] (gain) {gain head $\hat g(s_t,k_i)$};
+  \draw[ar] (txt) -- (e5); \draw[ar] (e5) -- (bank); \draw[ar] (bank) -- (gain);
+  \draw[ar] ($(h0)!0.5!(h1)+(0,-1.05)$) -- node[right, font=\scriptsize]{$c_{a_1}$} ($(h0)!0.5!(h1)$);
+  \draw[ar] ($(h1)!0.5!(h2)+(0,-1.05)$) -- node[right, font=\scriptsize]{$c_{a_2}$} ($(h1)!0.5!(h2)$);
+  \draw[ar, dashed] (h2.south east) -- node[above right, pos=0.45, font=\scriptsize]{$s_t$} (gain.north);
+\end{tikzpicture}}
+\caption{The reading agent: the table initialises a 2-layer GRU; at each step the gain head scores unread items, the reader consumes the best one, and $\hat y_t$ is available after every step.}
+\label{fig:arch}
+\end{figure}
+
+\textbf{Text items.}
+Each text field is split into sentences, merged or cut into chunks of at most 48 words (a field's chunks beyond the eighth merge into one tail item, which E5 truncates at 512 tokens).
+Items are allocated round-robin across fields up to $K=\max(8,\#\text{fields})$ per row, so every field has at least one item; the kept items contain every word of the row on 13 of the 20 datasets, before encoder truncation (coverage: Appendix~\ref{app:cov}).
+Each item is verbalised as \texttt{passage: <column>: <chunk>} and embedded once with frozen E5-small-v2~\cite{wang2022e5} ($e_i\in\mathbb{R}^{384}$, cached).
+Inside the model, an item is
+$c_i=\mathrm{LN}(W_{\text{item}}e_i + W_{\text{name}}\,\mathrm{E5}(\text{field name}) + p_{\text{pos}(i)})\in\mathbb{R}^{128}$.
+
+\textbf{Table encoder and anytime reader.}
+Numerical columns are quantile-normalised.
+Each column becomes a token $x_jw_j+m_ju_j+n_j$ (numerical; $m_j$ marks missingness) or $\mathrm{Emb}(v_j)+n_j$ (categorical), where $n_j$ is a projected E5 embedding of the column name.
+The flattened tokens pass through an MLP to $\htab\in\mathbb{R}^{128}$, which initialises both layers of a GRU~\cite{cho2014gru} (Fig.~\ref{fig:arch}).
+After reading items $a_1,\dots,a_t$, the state is $s_t=[h^{(2)}_t;\ \tfrac1t\sum_{\tau\le t}c_{a_\tau};\ \htab]$ (the mean term is zero at $t=0$), and an MLP predictor outputs $f(s_t)$.
+We train the encoder, reader and predictor together, sampling a fresh random reading order per batch:
+\begin{equation}
+\mathcal{L}_{\text{read}}=\tfrac12\cdot\tfrac{1}{n+1}\textstyle\sum_{t=0}^{n}\ell\big(f(s_t),y\big)+\tfrac12\,\ell\big(f(s_n),y\big),
+\end{equation}
+where $n\le K$ is the row's number of items, $\ell$ is cross-entropy for classification and MSE on the standardised target for regression.
+Random orders make $f$ a valid predictor after \emph{any} subset of reads, which the policy relies on.
+
+\textbf{Expected-gain policy.}
+With the reader frozen, a head $\hat g(s_t,k_i)=\mathrm{MLP}([s_t;k_i])$ predicts the loss reduction from reading item $i$ next.
+The \emph{content} key is $k_i=c_i$.
+The \emph{metadata} key uses only the field and position embeddings, so the content of unread text is never inspected.
+On a held-out inner-validation split we roll in $\varepsilon$-greedily ($\varepsilon=0.3$) with the current head, in the DAgger style~\cite{ross2011dagger}, so training states match the states the policy visits.
+At every visited state we compute the observed gain of every unread item and regress it:
+\begin{equation}
+\Delta_i(s_t)=\ell\big(f(s_t),y\big)-\ell\big(f(s_t\oplus c_i),y\big),\qquad
+\mathcal{L}_{\text{gain}}=\textstyle\sum_{t}\sum_{i\ \text{unread}}\big(\hat g(s_t,k_i)-\Delta_i(s_t)\big)^2 .
+\end{equation}
+The label only builds targets: at test time $\hat g$ estimates $\mathbb{E}[\Delta_i\mid s_t,k_i]$ without $y$, a predicted improvement of \emph{our} predictor's loss rather than an exact information estimate.
+\textbf{Inference:} read $\arg\max_i\hat g$ while $\max_i \hat g\ge\lambda$.
+For a target fraction of items read (10/25/50/75\%), we bisect $\lambda$ on the validation split.
+This needs only $\hat g$, not labels.
+
+\textbf{Why not imitation? (negative result).}
+Our first policy, a pointer network imitating a greedy oracle that reads the item most reducing the loss for the \emph{true} label, was no better than random in pilots: plausibly because the oracle's choices depend on $y$ (it reached 0.966 AUROC on Women Clothing with 1.5 reads per row), which the policy cannot see; regressing the \emph{expected} gain avoids this.
+
+\textbf{Full-budget accuracy mode.}
+For the benchmark objective we combine the read-all reader with a CatBoost Joint-Frozen model built from the same E5 cache (structured columns + PCA-30 of each field's whole-text E5 embedding).
+The convex weight $w\in\{0,0.05,\dots,1\}$ is tuned on inner validation.
+The reader learns target-trained projections of the text embeddings, so we treat \textbf{Joint TAR as the relevant bar} and also report Joint Frozen.
+
+%======================================================================
+\section{Experiments}
+
+\paragraph{Setup.}
+We use all 20 MulTaBench text datasets (10 classification, binary or macro one-vs-rest AUROC; 10 regression, $R^2$) under the paper protocol: random holdout splits (seed $42+$fold, test capped at 2{,}000 and train at 10{,}000 rows) ported from the official \texttt{paper\_version} code; five splits per dataset.
+An inner 80/20 split of the outer training set provides validation for early stopping (100 epochs, patience 15), the gain head, $\lambda$ and the blend weight; pilots informed the architecture, but the recipe was fixed before the five-split evaluation.
+All datasets share one configuration ($d=128$, dropout 0.2, AdamW lr $10^{-3}$, batch 256; gain head 15 epochs, lr $3\cdot10^{-3}$).
+Local CatBoost baselines share our exact rows; external references are the official leaderboard scores for the same split seeds (row identity unverified, so they are approximate references without significance tests).
+Following Dem\v{s}ar~\cite{demsar2006statistical}, we average folds within each dataset and run two-sided Wilcoxon signed-rank tests over datasets, separately for AUROC and $R^2$.
+
+\begin{table}[t]
+\caption{Full-budget accuracy, dataset means (folds averaged per dataset).
+W/T/L: datasets where the Blend wins, ties or loses against that row; $^{*}$: two-sided Wilcoxon $p<0.05$ (local rows only).
+$^{\dagger n}$: reference for only $n$ datasets; [ ]: the Blend's mean on those $n$.}
+\label{tab:main}
+\centering
+\footnotesize
+\input{generated/tab_main.tex}
+\end{table}
+
+\paragraph{Full-budget accuracy (Table~\ref{tab:main}).}
+The blend improves on CatBoost Joint Frozen on both families, against our local run on identical rows (\blendVsLocalCBClsDelta{} AUROC with \blendVsLocalCBClsWins/10 wins, $p=\blendVsLocalCBClsP$; \blendVsLocalCBRegDelta{} $R^2$ with \blendVsLocalCBRegWins/10 wins, $p=\blendVsLocalCBRegP$); against the leaderboard's CatBoost Frozen reference it wins on \blendVsLbCBFrozenClsWins/10 and \blendVsLbCBFrozenRegWins/10 datasets.
+Without fold 0, which pilots also used, the gains are +0.013 and +0.017 (both $p<0.01$).
+It does \emph{not} reach Joint TAR (\blendVsLbCBTarClsDelta{} AUROC and \blendVsLbCBTarRegDelta{} $R^2$ against CatBoost TAR; TabM and TabPFN-2.5 are stronger still), so the objective of beating Joint TAR is \textbf{not met}.
+The reader alone is competitive with CatBoost Frozen on classification (\readAllVsLocalCBClsDelta{} AUROC) but weaker on regression (\readAllVsLocalCBRegDelta{} $R^2$); their errors differ, which is why the blend helps (per-dataset results: Appendix~\ref{app:per}).
+The reader wins clearly when text carries most of the signal (Video Games $R^2$ \sVideoGamesReadAll{} vs.\ \sVideoGamesCBFrozen{} for CatBoost Frozen; Jigsaw AUROC \sJigsawToxicityReadAll{} vs.\ \sJigsawToxicityCBFrozen) and loses most on Zomato (\sZomatoReadAll{} vs.\ \sZomatoCBFrozen), whose rows average 1{,}900 words, of which the $K$ items keep only 6\%.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.56\linewidth]{generated/fig_budget.pdf}
+\caption{Score minus read-all score (dataset means) vs.\ fraction of items read. Solid: gain policy; dashed: random reader with the same per-row reads (3 orders); $\star$: read-all, natural order.}
+\label{fig:budget}
+\end{figure}
+
+\begin{table}[t]
+\caption{Gain policy minus matched-random reader per nominal budget (dataset level). ``read'': mean achieved test fraction; $p_{\text{Holm}}$: Wilcoxon $p$, Holm-adjusted~\cite{holm1979} over the 8 key$\times$budget cells per family.}
+\label{tab:budget}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\input{generated/tab_budget.tex}
+\end{table}
+
+\paragraph{Selective reading (Fig.~\ref{fig:budget}, Table~\ref{tab:budget}).}
+At 10\% of the items the content policy beats the matched random reader by \gainContentTenClsDelta{} AUROC (\gainContentTenClsWins/10 datasets) and \gainContentTenRegDelta{} $R^2$ (\gainContentTenRegWins/10); all 16 key$\times$budget comparisons are significant after Holm correction.
+The random reader gets the policy's per-row read counts, isolating \emph{which} items are read (and in what order) from \emph{how many}.
+Against random items with the same \emph{total} reads spread over rows by item count (Appendix~\ref{app:ctl}), the 10\% gap widens to \ctlTotalContentTenClsDelta{} AUROC and \ctlTotalContentTenRegDelta{} $R^2$ (\ctlTotalContentTenClsWins/10 and \ctlTotalContentTenRegWins/10): at small budgets choosing \emph{which rows} to read matters as much as which items, and stored field order is barely better than random.
+Metadata keys, which never see unread content, also win at every budget with smaller margins (\gainMetaTenClsDelta{} AUROC, \gainMetaTenRegDelta{} $R^2$ at 10\%).
+Discrete gain scores make some nominal budgets unattainable (Table~\ref{tab:budget}); only metadata keys could avoid embedding unread items.
+
+\paragraph{Where reading helps.}
+At 10\% of the items the content policy recovers a median \recContentTen{} of what reading everything adds over the table alone, against \recRandomContentTen{} for the matched random reader (metadata keys: \recMetaTen{} vs.\ \recRandomMetaTen; \recN{} datasets where text adds $\ge$0.02, Wilcoxon $p\,\recMaxP$).
+The advantage grows with how much the text helps (Spearman $\rho=\rhoTextEffectReg$, $p=\rhoTextEffectRegP$ on regression; $\rho=\rhoTextEffectCls$, $p=\rhoTextEffectClsP$ on classification), rather than simply with text length: it is largest on Rotten Tomatoes (+0.14 $R^2$), Vancouver Salaries (+0.11) and DS Salary (+0.085 AUROC), and near zero where the table decides (Montgomery Salaries) or rows hold 1--2 items (Product Sentiment, Jigsaw).
+Giving the table encoder each field's presence and log length (Appendix~\ref{app:ctl}) raises table-only scores (\fmTableClsDelta{} AUROC, \fmTableRegDelta{} $R^2$) and shrinks the 10\% content advantage on classification (\fmAdvContentTenClsWithout{}$\to$\fmAdvContentTenClsWith) but not regression (\fmAdvContentTenRegWithout{}$\to$\fmAdvContentTenRegWith): reading is partly, not only, ``read the long fields''.
+
+%======================================================================
+\section{Conclusion}
+
+On 20 MulTaBench text datasets, table-conditioned selective reading with a DIME-style gain policy significantly beats budget-matched random reading at every budget, even with metadata-only keys; blended with CatBoost Joint Frozen, the reader improves on it but does not reach Joint TAR.
+\textbf{Limitations:} a simple MLP table encoder holds back the full-budget reader (weak on regression); the gain head is one-step greedy; the inner validation split is reused for stopping, gain fitting and calibration; the $K$-item cap drops long text (Zomato).
+\textbf{Future work:} a stronger table backbone (e.g.\ TabM), lexical previews before E5 encoding, and LoRA-tuned item encoders.
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\appendix
+\makeatletter\setlength{\@fptop}{0pt}\setlength{\@fpsep}{12pt plus 1fil}\makeatother % top-align appendix float pages
+\section{Per-dataset results}\label{app:per}
+\begin{table}[h]
+\caption{Fold-mean scores per dataset. CB: our CatBoost (tab: tabular only).
+R: reader (table only / gain policy, content keys, @25\% / read all).
+Blend $\pm$ fold std.
+LB: MulTaBench leaderboard for matching split seeds (row identity unverified); best TAR is the maximum over the four learners.
+Bold: best of our columns.}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\resizebox{\linewidth}{!}{\input{generated/tab_per_dataset.tex}}
+\end{table}
+
+\clearpage
+\section{Text coverage of the item representation}\label{app:cov}
+\begin{table}[!ht]
+\caption{Fold-0 test rows. Items/row: items kept after the cap $K$; rows over $K$: rows with more candidate chunks than $K$; words kept: share of the row's words inside kept items (an upper bound on what E5 sees, since a field's chunks beyond the eighth are merged into one and E5 truncates at 512 tokens).}
+\centering
+\scriptsize
+\input{generated/tab_coverage.tex}
+\end{table}
+
+\IfFileExists{generated/tab_controls.tex}{%
+\section{Reading controls}\label{app:ctl}
+\begin{table}[!ht]
+\caption{Dataset-level mean difference (wins/datasets) at nominal budgets 10\% and 50\%, all five folds (folds averaged per dataset).
+\emph{Same total reads}: random items, with the policy's total number of reads spread over rows in proportion to their item counts.
+\emph{Same per-row reads}: random items with the policy's per-row counts (as in Table~\ref{tab:budget}).
+\emph{Row allocation}: the second random reader minus the first.
+\emph{Natural order}: fields and chunks in their stored order, same counts as the first reader.
+$^{*}$: Holm-adjusted Wilcoxon $p<0.05$ over the eight key$\times$budget cells.}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\input{generated/tab_controls.tex}
+\end{table}
+\IfFileExists{generated/tab_fieldmeta.tex}{%
+\begin{table}[!ht]
+\caption{Adding each text field's presence flag and log word count to the table encoder (fold 0, matched datasets).
+Gain $-$ random is the advantage over the per-row matched random reader. $^{*}$: Wilcoxon $p<0.05$.}
+\centering
+\scriptsize
+\input{generated/tab_fieldmeta.tex}
+\end{table}}{}}{}
+
+\end{document}

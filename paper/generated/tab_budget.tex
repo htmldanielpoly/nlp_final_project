@@ -1,0 +1,17 @@
+\begin{tabular}{@{}llcccccccc@{}}
+\toprule
+ & & \multicolumn{4}{c}{Classification ($\Delta$AUROC)} & \multicolumn{4}{c}{Regression ($\Delta R^2$)} \\
+\cmidrule(lr){3-6}\cmidrule(lr){7-10}
+Keys & Budget & read & $\Delta$ & W/T/L & $p_{\text{Holm}}$ & read & $\Delta$ & W/T/L & $p_{\text{Holm}}$ \\
+\midrule
+content & 10\% & 10\% & +0.026 & 9/1/0 & 0.031 & 10\% & +0.051 & 10/0/0 & 0.016 \\
+content & 25\% & 25\% & +0.024 & 9/1/0 & 0.031 & 25\% & +0.053 & 10/0/0 & 0.016 \\
+content & 50\% & 50\% & +0.014 & 9/1/0 & 0.031 & 50\% & +0.039 & 10/0/0 & 0.016 \\
+content & 75\% & 75\% & +0.007 & 9/1/0 & 0.031 & 75\% & +0.023 & 9/0/1 & 0.018 \\
+\midrule
+metadata & 10\% & 9\% & +0.010 & 8/1/1 & 0.031 & 10\% & +0.037 & 10/0/0 & 0.016 \\
+metadata & 25\% & 25\% & +0.018 & 8/1/1 & 0.031 & 25\% & +0.039 & 9/0/1 & 0.018 \\
+metadata & 50\% & 54\% & +0.012 & 8/1/1 & 0.031 & 50\% & +0.034 & 9/0/1 & 0.018 \\
+metadata & 75\% & 76\% & +0.007 & 9/1/0 & 0.031 & 75\% & +0.021 & 9/0/1 & 0.016 \\
+\bottomrule
+\end{tabular}
