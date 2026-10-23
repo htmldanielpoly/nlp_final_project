@@ -1,0 +1,40 @@
+[project]
+name = "reading-agent-v2"
+version = "0.2.0"
+description = "Reading agent v2: cross-fitted reader signals and table-conditioned item encoders (MulTaBench)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "catboost>=1.2.10",
+    "huggingface-hub>=1.33.0",
+    "lightgbm>=4.7.0",
+    "matplotlib>=3.11.2",
+    "pandas>=3.0.6",
+    "peft>=0.18.0",
+    "pyarrow>=25.0.1",
+    "pytabkit>=1.7.0",
+    "scikit-learn>=1.9.1",
+    "scipy>=1.17.1",
+    "sentence-transformers>=6.1.0",
+    "tabpfn>=7.1.1",
+    "torch>=2.14.1",
+    "tqdm>=4.70.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# reading_agent: the v1 package, unchanged (also needed to load the v1 artifacts' pickles).
+# reading_agent2: the v2 additions.
+packages = ["src/reading_agent", "src/reading_agent2"]
+
+# CUDA 12.6 wheels on Linux (the T4 VM's driver 570 does not support the default CUDA 13 build).
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126", marker = "sys_platform == 'linux'" }

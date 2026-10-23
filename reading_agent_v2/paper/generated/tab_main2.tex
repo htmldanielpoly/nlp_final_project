@@ -1,0 +1,26 @@
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+ & \multicolumn{2}{c}{Classification (10, AUROC)} & \multicolumn{2}{c}{Regression (10, $R^2$)} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Method & mean & Ours W/T/L & mean & Ours W/T/L \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{Ours (cross-fitted readers, local heads)}} \\
+Reader, frozen E5 items & 0.889 & 10/0/0$^{*}$ & 0.683 & 3/0/0 \\
+Reader, TabLoRA items & 0.900 & 9/1/0$^{*}$ & 0.717 & 3/0/0 \\
+TabM Frozen + TabLoRA reader & 0.908 & 7/3/0$^{*}$ & 0.756 & 3/0/0 \\
+TabPFN-2.5 Frozen + TabLoRA reader & 0.894$^{\dagger8}$\,[0.895] & 3/1/4 & 0.780 & 1/0/2 \\
+\textbf{Ours}: mean of the two blends & 0.911 &  & 0.774 &  \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{Local baselines (identical rows)}} \\
+v1 Blend: CatBoost Frozen + reader & 0.896 & 9/0/1$^{*}$ & 0.749 & 3/0/0 \\
+CatBoost, Joint Frozen & 0.886 & 10/0/0$^{*}$ & 0.735 & 3/0/0 \\
+TabM, Joint Frozen & 0.896 & 10/0/0$^{*}$ & 0.749 & 3/0/0 \\
+TabPFN-2.5, Joint Frozen & 0.881$^{\dagger8}$\,[0.895] & 6/0/2 & 0.779 & 1/0/2 \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{MulTaBench reference, Joint TAR (LoRA-tuned E5)}} \\
+CatBoost, Joint TAR & 0.904 & 7/0/3 & 0.767 & 2/0/1 \\
+LightGBM, Joint TAR & 0.893 & 8/0/2 & 0.749 & 2/0/1 \\
+TabM, Joint TAR & 0.911 & 3/0/7 & 0.759 & 2/0/1 \\
+TabPFN-2.5, Joint TAR & 0.898$^{\dagger8}$\,[0.895] & 2/0/6 & 0.776 & 1/0/2 \\
+\bottomrule
+\end{tabular}

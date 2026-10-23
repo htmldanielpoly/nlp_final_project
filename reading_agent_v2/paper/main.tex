@@ -1,0 +1,257 @@
+\documentclass{article}
+% NeurIPS template; "preprint" removes line numbers and the anonymous-submission banner.
+\usepackage[preprint]{neurips_2025}
+\makeatletter\renewcommand{\@noticestring}{NLP 097215 Final Project (Track 1), Technion, 2026.
+Code: \url{https://github.com/htmldanielpoly/nlp_final_project}; weights: \url{https://huggingface.co/htmldaniel/reading-agent-v2-multabench}.}\makeatother
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts,amsmath,amssymb}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc}
+
+% v1 selective-reading results (reading_agent, tag paper_v2) and v2 full-budget results (reading_agent_v2)
+\input{generated/numbers.tex}
+\IfFileExists{generated/controls.tex}{\input{generated/controls.tex}}{}
+% written by `python -m reading_agent2.paper_assets2` (reading_agent_v2)
+\input{generated/numbers2.tex}
+\newcommand{\htab}{h_{\mathrm{tab}}}
+\setlength{\textfloatsep}{9pt plus 2pt minus 4pt}
+\setlength{\floatsep}{7pt plus 2pt minus 2pt}
+
+\title{Reading What Matters: Table-Conditioned\\Text Reading for Text-Tabular Prediction}
+
+\author{Daniel Polyanovsky\\Technion -- Israel Institute of Technology}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Text-tabular models embed every text field of a row with an encoder that ignores the row's structured columns.
+We make reading \emph{table-conditioned} at two levels.
+A table encoder initialises a recurrent \emph{anytime} reader that consumes field-tagged sentence items one at a time, and an expected-gain head, adapted from dynamic feature selection, decides which items to read; \emph{TabLoRA}, a low-rank adapter in E5's top layers whose rank space is gated per row by the table encoding, changes how each item is encoded.
+On all 20 MulTaBench text datasets (five splits each), learned reading beats a random reader with the same per-row budget at every budget we test (\gainContentTenClsDelta{} AUROC and \gainContentTenRegDelta{} $R^2$ at a nominal 10\% of the items).
+For full accuracy, cross-fitted TabLoRA readers blended with Joint-Frozen TabM and TabPFN-2.5 reach \oursCls{} AUROC and \oursReg{} $R^2$, significantly above our earlier CatBoost blend (\oursVsVoneClsDelta{} AUROC, \oursVsVoneRegDelta{} $R^2$) and the local Joint-Frozen learners on identical rows, and at the level of the MulTaBench Joint TAR references (TabM TAR: \tabmTarCls{} and \tabmTarReg).
+\end{abstract}
+
+%======================================================================
+\section{Introduction}
+
+In text-tabular learning, a row combines numerical and categorical columns with free-text fields such as reviews or job descriptions~\cite{arazi2026multabench}.
+Standard practice embeds each field with a pretrained encoder such as E5~\cite{wang2022e5} and trains a tabular learner on the result (\emph{Joint Frozen}), or fine-tunes the encoder on the target (\emph{Joint TAR})~\cite{arazi2025tabstar,arazi2026multabench}.
+Either way, the text is encoded without looking at the rest of the row, and every field is treated as equally necessary.
+Human analysts read differently: if a wine's price and region already pin down its grade, the review matters only when the table leaves the answer open, and the same sentence (``a bargain'') means something different for a \$9 and a \$90 bottle.
+We build both observations into one model: the structured part of a row initialises a recurrent reader that acquires text one \emph{item} (a field-tagged sentence chunk) at a time, a gain head decides which item is worth reading next, and the encoder's own adapters are modulated by the table.
+
+\paragraph{Contributions.}
+(i)~A table-conditioned anytime reader for text-tabular rows, valid after any subset of reads, with a label-free reading policy that regresses observed one-step loss reductions, in the spirit of DIME~\cite{gadgil2024dime}.
+(ii)~TabLoRA: LoRA~\cite{hu2022lora} adapters in E5 whose rank space is gated by the row's table encoding, trained through the reader.
+(iii)~A leakage-free combination of the reader with strong tabular learners: cross-fitted reader predictions, blended with TabM~\cite{gorishniy2024tabm} and TabPFN-2.5~\cite{grinsztajn2025tabpfn25} on validation rows.
+(iv)~An evaluation on all 20 MulTaBench text datasets with paired local baselines on identical rows and ablations of each part.
+
+%======================================================================
+\section{Related Work}
+
+\textbf{Text-tabular learning.}
+MulTaBench~\cite{arazi2026multabench} curates datasets on which text and structure are jointly needed and target-aware representations help.
+It evaluates CatBoost~\cite{prokhorenkova2018catboost}, LightGBM~\cite{ke2017lightgbm}, TabM~\cite{gorishniy2024tabm} and TabPFN~\cite{hollmann2025tabpfn,grinsztajn2025tabpfn25} with frozen or LoRA-tuned~\cite{hu2022lora} E5 embeddings; TabSTAR~\cite{arazi2025tabstar} unfreezes the text encoder inside a tabular foundation model, and CARTE~\cite{kim2024carte} embeds column names and strings.
+Ensembling neural text models with tabular learners is strong~\cite{shi2021multimodal}; we combine them by stacking-style cross-fitting~\cite{wolpert1992stacked}.
+\textbf{Conditioning and adaptive reading.}
+TabLoRA's gate is a FiLM-style~\cite{perez2018film} scaling of LoRA's rank space by side information.
+Dynamic feature selection chooses features per instance~\cite{shim2018afa,covert2023dfs}; DIME~\cite{gadgil2024dime} regresses the loss reduction and stops at a threshold, which our gain head applies to text chunks.
+Skim readers~\cite{yu2017skim,seo2018skimrnn,graves2016act} skip tokens or steps within one document; we select among a row's fields, conditioned on its columns.
+
+%======================================================================
+\section{Method}
+
+\begin{figure}[t]
+\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[node distance=4mm and 6mm,
+  bx/.style={draw, rounded corners=2pt, thick, align=center, minimum height=7mm, inner sep=3pt, font=\small},
+  tb/.style={bx, draw=blue!60!black, fill=blue!8},
+  tx/.style={bx, draw=orange!70!black, fill=orange!10},
+  rn/.style={bx, draw=green!45!black, fill=green!10, minimum width=10mm},
+  hd/.style={bx, draw=violet!70!black, fill=violet!8},
+  fz/.style={bx, draw=gray, fill=gray!12},
+  ar/.style={-{Stealth[length=2mm]}, thick}]
+  \node[tb] (row) {num.\,+\,cat.\ columns};
+  \node[tb, right=of row] (enc) {table encoder};
+  \node[rn, right=22mm of enc] (h0) {$h_0$};
+  \node[rn, right=9mm of h0] (h1) {$h_1$};
+  \node[rn, right=9mm of h1] (h2) {$h_2$};
+  \node[font=\small, right=4mm of h2] (dots) {$\cdots$};
+  \node[hd, right=4mm of dots] (stop) {STOP if\\$\max_i \hat g_i<\lambda$};
+  \foreach \t in {0,1,2} { \node[hd, above=4mm of h\t] (y\t) {$\hat y_\t$}; \draw[ar] (h\t) -- (y\t); }
+  \draw[ar] (row) -- (enc); \draw[ar] (enc) -- node[above, font=\scriptsize]{$\tanh(W_0\htab)$} (h0);
+  \draw[ar] (h0) -- (h1); \draw[ar] (h1) -- (h2); \draw[ar] (h2) -- (dots); \draw[ar] (dots) -- (stop);
+  \node[tx, below=9mm of row] (txt) {text fields};
+  \node[fz, right=of txt] (e5) {E5 layers 1--9 (frozen)\\[-1pt]layers 10--12 + TabLoRA};
+  \node[tx, right=6mm of e5, minimum width=34mm] (bank) {item bank $c_1,\dots,c_K$};
+  \node[hd, right=6mm of bank] (gain) {gain head $\hat g(s_t,k_i)$};
+  \draw[ar] (txt) -- (e5); \draw[ar] (e5) -- (bank); \draw[ar] (bank) -- (gain);
+  \draw[ar, dashed, blue!60!black] (enc.south) -- node[right, font=\scriptsize]{gate $\htab$} (e5.north -| enc.south);
+  \draw[ar] ($(h0)!0.5!(h1)+(0,-1.05)$) -- node[right, font=\scriptsize]{$c_{a_1}$} ($(h0)!0.5!(h1)$);
+  \draw[ar] ($(h1)!0.5!(h2)+(0,-1.05)$) -- node[right, font=\scriptsize]{$c_{a_2}$} ($(h1)!0.5!(h2)$);
+  \draw[ar, dashed] (h2.south east) -- node[above right, pos=0.45, font=\scriptsize]{$s_t$} (gain.north);
+\end{tikzpicture}}
+\caption{The reader: the table initialises a 2-layer GRU and gates the LoRA adapters of E5's top layers; at each step the gain head scores unread items, the reader consumes the best one, and $\hat y_t$ is available after every step.}
+\label{fig:arch}
+\end{figure}
+
+\textbf{Text items.}
+Each text field is split into sentences, merged or cut into chunks of at most 48 words (a field's chunks beyond the eighth merge into one tail item).
+Items are allocated round-robin across fields up to $K=\max(8,\#\text{fields})$ per row, so every field has at least one item; the kept items contain every word of the row on 13 of the 20 datasets (Appendix~\ref{app:cov}).
+Each item is verbalised as \texttt{passage: <column>: <chunk>} and embedded with E5-small-v2~\cite{wang2022e5} ($e_i\in\mathbb{R}^{384}$); inside the model it becomes
+$c_i=\mathrm{LN}(W_{\text{item}}e_i + W_{\text{name}}\,\mathrm{E5}(\text{field name}) + p_{\text{pos}(i)})\in\mathbb{R}^{128}$.
+
+\textbf{Table encoder and anytime reader.}
+Each column becomes a token $x_jw_j+m_ju_j+n_j$ (quantile-normalised numerical; $m_j$ marks missingness) or $\mathrm{Emb}(v_j)+n_j$ (categorical), where $n_j$ is a projected E5 embedding of the column name.
+An MLP maps the tokens to $\htab\in\mathbb{R}^{128}$, which initialises both layers of a GRU~\cite{cho2014gru}.
+After reading items $a_1,\dots,a_t$ the state is $s_t=[h^{(2)}_t;\ \tfrac1t\sum_{\tau\le t}c_{a_\tau};\ \htab]$ (the mean is zero at $t=0$), and an MLP predicts $f(s_t)$.
+Training samples a fresh random reading order per batch and averages the loss over all prefixes:
+\begin{equation}
+\mathcal{L}_{\text{read}}=\tfrac12\cdot\tfrac{1}{n+1}\textstyle\sum_{t=0}^{n}\ell\big(f(s_t),y\big)+\tfrac12\,\ell\big(f(s_n),y\big),
+\end{equation}
+with $n\le K$ the row's items and $\ell$ cross-entropy (classification) or MSE on the standardised target, so $f$ is valid after \emph{any} subset of reads.
+
+\textbf{Expected-gain policy.}
+With the reader frozen, a head $\hat g(s_t,k_i)=\mathrm{MLP}([s_t;k_i])$ regresses the observed gain of reading item $i$ next, $\Delta_i(s_t)=\ell(f(s_t),y)-\ell(f(s_t\oplus c_i),y)$, over all unread items at states visited by an $\varepsilon$-greedy roll-in on held-out rows (DAgger style~\cite{ross2011dagger}).
+\emph{Content} keys are $k_i=c_i$; \emph{metadata} keys use only field and position, so unread content is not inspected.
+At inference the head needs no label: read $\arg\max_i\hat g$ while $\max_i\hat g\ge\lambda$, with $\lambda$ bisected on validation rows for a target fraction of items.
+A pointer network imitating a label-aware greedy oracle was no better than random in pilots, plausibly because the oracle's choices depend on $y$.
+
+\textbf{TabLoRA.}
+Joint TAR tunes E5 to the target but encodes a sentence the same way in every row.
+We add LoRA adapters ($r=16$, $\alpha=32$) to the query, key, value, attention-output and both feed-forward maps of E5's last three layers (MulTaBench's TAR placement) and gate their rank space with the row's table encoding:
+\begin{equation}
+W x\ \mapsto\ W x+\tfrac{\alpha}{r}\,B\,\mathrm{diag}\big(1+\tanh(G_W\,\htab)\big)\,A\,x ,
+\end{equation}
+with $B$ and every $G_W$ initialised at zero, so training starts from frozen E5 and from plain LoRA.
+Training has two phases: the reader is fit with frozen items (as above), then the adapters and gates are trained through $\mathcal{L}_{\text{read}}$ with the reader fixed (lr $10^{-3}$, batch 64, at most 10 epochs, patience 3, fp16).
+Hidden states entering layer 10 are cached once per item (truncated at 128 tokens), so each step runs only the top three layers.
+
+\textbf{Cross-fitted reader signals and heads.}
+For full-budget accuracy we pair the reader with tabular learners on the Joint-Frozen frame (structured columns + PCA-30 of each field's whole-text E5 embedding).
+To avoid training-row leakage the reader is \emph{cross-fitted}: three readers are trained on two thirds of the training rows each; every training row is predicted by the reader that did not see it, and test rows get the mean of the three.
+TabM and TabPFN-2.5 are fit on the frozen frame alone; for each, a convex weight $w\in\{0,0.05,\dots,1\}$ between learner and read-all reader is tuned on a held-out 20\% of the training rows, on which the reader's predictions are out-of-fold.
+The final prediction is the unweighted mean of the two blends; this choice and all hyperparameters were fixed before the five-split evaluation (fold-0 pilots on three datasets informed them).
+As in MulTaBench, TabPFN is not used beyond 10 classes (Spotify, Wine), where TabM's blend is used alone.
+
+%======================================================================
+\section{Experiments}
+
+\paragraph{Setup.}
+We use all 20 MulTaBench text datasets (10 classification: binary or macro one-vs-rest AUROC; 10 regression: $R^2$) under the paper protocol: random holdout splits (seed $42+$fold, test $\le$2{,}000 and train $\le$10{,}000 rows) ported from the official code, five splits per dataset, on pinned dataset revisions.
+The reader uses one configuration everywhere ($d=128$, dropout 0.2, AdamW lr $10^{-3}$, 100 epochs, patience 15 on an inner split); TabLoRA's settings were chosen on inner-validation loss of one pilot (Jigsaw, fold 0).
+TabM and TabPFN-2.5 run with their default settings (TabM early-stops on the same 20\% split).
+Local baselines are run on our exact rows; external references are the official leaderboard scores for the same split seeds (row identity unverified, so no significance test against them).
+Following Dem\v{s}ar~\cite{demsar2006statistical}, folds are averaged per dataset and two-sided Wilcoxon signed-rank tests run over datasets, separately for AUROC and $R^2$.
+Training used one T4 GPU (TabLoRA: \loraMinutes{} min per dataset split for all three readers).
+
+\begin{table}[t]
+\caption{Full-budget accuracy, dataset means (folds averaged per dataset).
+W/T/L: datasets where Ours wins, ties or loses against that row; $^{*}$: two-sided Wilcoxon $p<0.05$ (local rows only).
+$^{\dagger n}$: available for $n$ datasets only; [ ]: Ours on those $n$.}
+\label{tab:main}
+\centering
+\footnotesize
+\input{generated/tab_main2.tex}
+\end{table}
+
+\paragraph{Full-budget accuracy (Table~\ref{tab:main}).}
+Our model improves on every local baseline on both task families: on our previous CatBoost blend by \oursVsVoneClsDelta{} AUROC (\oursVsVoneClsWins/\oursVsVoneClsN{} datasets, $p=\oursVsVoneClsP$) and \oursVsVoneRegDelta{} $R^2$ (\oursVsVoneRegWins/\oursVsVoneRegN, $p=\oursVsVoneRegP$), and on Joint-Frozen TabM by \oursVsTabMClsDelta{} AUROC ($p=\oursVsTabMClsP$) and \oursVsTabMRegDelta{} $R^2$ ($p=\oursVsTabMRegP$).
+Against the Joint TAR references, which fine-tune E5 on the target, it is level with TabM TAR on classification (\oursVsLbTabMTarClsDelta, \oursVsLbTabMTarClsWins/\oursVsLbTabMTarClsN{} wins) and ahead on regression (\oursVsLbTabMTarRegDelta, \oursVsLbTabMTarRegWins/\oursVsLbTabMTarRegN), and \oursVsLbBestTarClsDelta{} AUROC and \oursVsLbBestTarRegDelta{} $R^2$ from the per-dataset best of the four TAR learners (Appendix~\ref{app:per}).
+
+\begin{table}[t]
+\caption{Where the gains come from: dataset-level mean difference, wins and Wilcoxon $p$ (all five folds unless noted).}
+\label{tab:abl}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\input{generated/tab_ablation2.tex}
+\end{table}
+
+\paragraph{Ablations (Table~\ref{tab:abl}).}
+TabLoRA makes the reader itself better (\loraReaderClsDelta{} AUROC, \loraReaderClsWins/\loraReaderClsN{} datasets; \loraReaderRegDelta{} $R^2$, \loraReaderRegWins/\loraReaderRegN), largest where the text carries the signal (Jigsaw \sJigsawToxicityR{}$\to$\sJigsawToxicityRLora{} AUROC).
+After blending with the learners, part of this gain is absorbed (\loraSystemClsDelta{} and \loraSystemRegDelta), because the learners already see the frozen text embeddings.
+The reader adds to both learners, and the two blends are better than either alone: their errors differ.
+Blending and stacking the reader's predictions as features into TabM perform alike, so we keep the simpler blend.
+
+\begin{table}[t]
+\caption{Selective reading (frozen-item reader): gain policy minus a random reader with the same per-row number of reads, per nominal budget. ``read'': achieved test fraction; $p_{\text{Holm}}$: Wilcoxon $p$, Holm-adjusted~\cite{holm1979} over the 8 key$\times$budget cells per family.}
+\label{tab:budget}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\input{generated/tab_budget.tex}
+\end{table}
+
+\paragraph{Selective reading (Table~\ref{tab:budget}).}
+These experiments use the reader with frozen items.
+At 10\% of the items the content policy beats the matched random reader by \gainContentTenClsDelta{} AUROC (\gainContentTenClsWins/10 datasets) and \gainContentTenRegDelta{} $R^2$ (\gainContentTenRegWins/10); all 16 key$\times$budget comparisons are significant after Holm correction, and metadata keys, which never see unread content, also win at every budget.
+Against random items with the same \emph{total} reads spread over rows (Appendix~\ref{app:ctl}), the 10\% gap widens to \ctlTotalContentTenClsDelta{} AUROC: choosing \emph{which rows} to read matters as much as which items.
+At 10\% of the items the policy recovers a median \recContentTen{} of what reading everything adds over the table alone (random: \recRandomContentTen).
+
+%======================================================================
+\section{Conclusion}
+
+Conditioning text reading on the table helps at both levels we tried: what to read (a label-free gain policy beats budget-matched random reading at every budget) and how to read it (TabLoRA improves the reader).
+Cross-fitted and blended with Joint-Frozen TabM and TabPFN-2.5, the reader significantly improves on all local baselines and reaches the Joint TAR references without fine-tuning E5 on the learners' side.
+\textbf{Limitations:} TabLoRA's gain shrinks once strong learners are added; the selective-reading results use the frozen-item reader; all items are embedded before selection, so the read fraction is not a compute saving; the $K$-item cap drops long text (Zomato); TabPFN needs its training rows at inference.
+\textbf{Future work:} TAR-tuned frozen frames for the learners, lazy encoding of selected items only, and a multi-step gain policy.
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\appendix
+\makeatletter\setlength{\@fptop}{0pt}\setlength{\@fpsep}{12pt plus 1fil}\makeatother % top-align appendix float pages
+\section{Per-dataset results}\label{app:per}
+\begin{table}[h]
+\caption{Fold-mean scores per dataset. v1: CatBoost Frozen + frozen-item reader blend; TabM, PFN: Joint-Frozen learners on our rows; R / R$_{\text{LoRA}}$: cross-fitted reader with frozen / TabLoRA items; Ours $\pm$ fold std. LB: MulTaBench leaderboard (TabM TAR and the best of four TAR learners) for matching split seeds. Bold: best of our columns.}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\resizebox{\linewidth}{!}{\input{generated/tab_per_dataset2.tex}}
+\end{table}
+
+\clearpage
+\section{Text coverage of the item representation}\label{app:cov}
+\begin{table}[!ht]
+\caption{Fold-0 test rows. Items/row: items kept after the cap $K$; rows over $K$: rows with more candidate chunks than $K$; words kept: share of the row's words inside kept items (an upper bound on what E5 sees).}
+\centering
+\scriptsize
+\input{generated/tab_coverage.tex}
+\end{table}
+
+\IfFileExists{generated/tab_controls.tex}{%
+\section{Reading controls}\label{app:ctl}
+\begin{table}[!ht]
+\caption{Frozen-item reader, dataset-level mean difference (wins/datasets) at nominal budgets 10\% and 50\%, all five folds.
+\emph{Same total reads}: random items, with the policy's total number of reads spread over rows in proportion to their item counts.
+\emph{Same per-row reads}: random items with the policy's per-row counts (as in Table~\ref{tab:budget}).
+\emph{Row allocation}: the second random reader minus the first.
+\emph{Natural order}: fields and chunks in their stored order, same counts as the first reader.
+$^{*}$: Holm-adjusted Wilcoxon $p<0.05$ over the eight key$\times$budget cells.}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\input{generated/tab_controls.tex}
+\end{table}
+\IfFileExists{generated/tab_fieldmeta.tex}{%
+\begin{table}[!ht]
+\caption{Adding each text field's presence flag and log word count to the table encoder (fold 0, matched datasets).
+Gain $-$ random is the advantage over the per-row matched random reader. $^{*}$: Wilcoxon $p<0.05$.}
+\centering
+\scriptsize
+\input{generated/tab_fieldmeta.tex}
+\end{table}}{}}{}
+
+\end{document}

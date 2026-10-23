@@ -1,0 +1,24 @@
+\begin{tabular}{@{}lcccccccc@{}}
+\toprule
+ & \multicolumn{6}{c}{Ours and local baselines (identical rows)} & \multicolumn{2}{c}{LB Joint TAR} \\
+\cmidrule(lr){2-7}\cmidrule(lr){8-9}
+Dataset & v1 & TabM & PFN & R & R$_{\text{LoRA}}$ & Ours & TabM & best \\
+\midrule
+\multicolumn{9}{@{}l}{\emph{Classification (AUROC)}} \\
+Fake Job Posting & 0.912 & 0.948 & 0.952 & 0.918 & 0.922 & \textbf{0.961} & 0.934 & 0.934 \\
+Jigsaw Toxicity & 0.841 & 0.805 & 0.805 & 0.843 & \textbf{0.898} & \textbf{0.898} & 0.917 & 0.927 \\
+Kickstarter & 0.741 & 0.745 & 0.743 & 0.732 & 0.740 & \textbf{0.752} & 0.760 & 0.760 \\
+DS Salary & 0.825 & 0.829 & 0.833 & 0.823 & 0.829 & \textbf{0.835} & 0.832 & 0.834 \\
+Michelin & 0.913 & 0.914 & 0.913 & 0.903 & 0.909 & \textbf{0.918} & 0.919 & 0.926 \\
+Product Sentiment & 0.901 & 0.907 & \textbf{0.912} & 0.901 & 0.900 & 0.907 & 0.909 & 0.916 \\
+Spotify Genres & \textbf{0.968} & 0.957 & -- & 0.953 & 0.958 & 0.966 & 0.964 & 0.965 \\
+US Accidents & 0.972 & 0.970 & \textbf{0.979} & 0.937 & 0.956 & 0.977 & 0.980 & 0.985 \\
+Wine Review & 0.978 & 0.976 & -- & 0.976 & 0.980 & \textbf{0.980} & 0.981 & 0.981 \\
+Women Clothing & 0.907 & 0.910 & 0.911 & 0.903 & 0.905 & \textbf{0.911} & 0.914 & 0.914 \\
+\midrule
+\multicolumn{9}{@{}l}{\emph{Regression ($R^2$)}} \\
+Babies Prices & 0.890 & 0.880 & \textbf{0.919} & 0.841 & 0.859 & 0.910 & 0.923 & 0.930 \\
+Book Price & 0.554 & 0.571 & \textbf{0.616} & 0.434 & 0.491 & 0.602 & 0.555 & 0.579 \\
+Book Readability & 0.801 & 0.795 & 0.802 & 0.773 & 0.801 & \textbf{0.809} & 0.800 & 0.836 \\
+\bottomrule
+\end{tabular}

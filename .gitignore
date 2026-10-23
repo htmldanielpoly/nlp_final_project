@@ -22,3 +22,8 @@ paper/*.log
 paper/*.out
 paper/*.bbl
 paper/*.blg
+
+# v2 experiment outputs (weights on Hugging Face, scores in reading_agent_v2/evaluation)
+reading_agent_v2/results/
+reading_agent_v2/logs/
+reading_agent_v2/catboost_info/
