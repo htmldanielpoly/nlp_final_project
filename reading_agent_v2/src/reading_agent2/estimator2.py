@@ -67,6 +67,25 @@ class ItemStatesAny(tc.ItemStates):
         self.flat, self.device = torch.cat(chunks), device
 
 
+def _devices_to_cpu(obj, seen=None):
+    """pytabkit keeps the training device in nested interfaces (`device`, `device_`); point them at the CPU."""
+    seen = set() if seen is None else seen
+    if id(obj) in seen or not hasattr(obj, "__dict__") or isinstance(obj, (torch.Tensor, torch.nn.Module)):
+        return
+    seen.add(id(obj))
+    for k, v in vars(obj).items():
+        if k in ("device", "device_") and str(v).startswith("cuda"):
+            setattr(obj, k, torch.device("cpu") if isinstance(v, torch.device) else "cpu")
+        elif isinstance(v, (list, tuple)):
+            for x in v:
+                _devices_to_cpu(x, seen)
+        elif isinstance(v, dict):
+            for x in v.values():
+                _devices_to_cpu(x, seen)
+        else:
+            _devices_to_cpu(v, seen)
+
+
 def _id_matrix(layout, tid, K):
     m = np.zeros((len(layout), K), np.int64)
     for i, r in enumerate(layout):
@@ -304,8 +323,8 @@ class TabLoRAStack:
         obj.states_dicts = [torch.load(path / f"reader_{k}.pt", map_location="cpu", weights_only=True) for k in range(man["n_readers"])]
         if (path / "tabm.pt").exists():
             obj.tabm = torch.load(path / "tabm.pt", map_location=loc, weights_only=False)
-            if loc == "cpu" and hasattr(obj.tabm, "device"):
-                obj.tabm.device = "cpu"
+            if loc == "cpu":
+                _devices_to_cpu(obj.tabm)
         obj.context = pd.read_parquet(path / "context.parquet")
         return obj
 
@@ -358,8 +377,13 @@ def export(dataset, fold, tag="v2", out_root=None):
     return path
 
 
-def check(dataset, fold, tag="v2", root=None, device=None, rows=None, tolerance=1e-3):
-    """Replay a run's stored test predictions from raw rows and the artifact (local or downloaded)."""
+def check(dataset, fold, tag="v2", root=None, device=None, rows=None, tolerance=None):
+    """Replay a run's stored test predictions from raw rows and the artifact (local or downloaded).
+
+    Readers were trained and scored under fp16 autocast on GPU; an fp32 CPU replay differs slightly
+    (e.g. 2.6e-3 in standardised target units on Montgomery f0, same score), hence the looser CPU tolerance."""
+    if tolerance is None:
+        tolerance = 1e-3 if _device(device) == "cuda" else 1e-2
     root = Path(root or ROOT / "results" / "models" / tag / run_id(dataset, fold))
     obj = TabLoRAStack.load(root, device)
     ds, x_tr, x_te, y_tr, y_te, te_idx, *_ = prepare(dataset, fold)
