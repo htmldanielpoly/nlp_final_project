@@ -38,6 +38,8 @@ while read d f; do
   $PY -m reading_agent2.stack heads --dataset $d --fold $f --tag v2 > logs/heads/${d}_f${f}.log 2>&1 \
     && echo "heads done $d $f" || echo "heads FAILED $d $f"
 done < $LIST
+echo "step 2b: heads of any run still missing from results/v2.jsonl (e.g. an earlier TabPFN OOM)"
+bash scripts/run_heads.sh "0 1 2 3 4" v2 | grep -v "^done"
 missing=$(for r in results/stackB/*_f*/; do [ -f $r/weights/reader_2.pt ] || echo $r; done)
 [ -n "$missing" ] && { echo "still incomplete: $missing"; exit 1; }
 echo "step 3: gate ablation, and exports of all runs"

@@ -35,7 +35,7 @@ from reading_agent.features import FeaturePipeline, whole_text_embeddings
 from reading_agent.run import score
 from reading_agent.train import Config
 
-from .stack import PRIMARY, ROOT, _full_probs, _ordinal, design, fit_tabm, fit_tabpfn, prepare, reader_feats, tabm_predict
+from .stack import PRIMARY, ROOT, _full_probs, _ordinal, design, fit_tabm, fit_tabpfn, prepare, reader_feats, tabm_predict, tabpfn_predict
 from . import tabcond as tc
 
 FORMAT = 2
@@ -231,7 +231,7 @@ class TabLoRAStack:
             else:
                 Xo, _ = _ordinal(X, X, cats)
                 m = fit_tabpfn(Xo.iloc[i_in], y_tr[i_in], cats, self.task, seed=self.seed)
-                val = m.predict(Xo.iloc[i_va]) if self.task == "regression" else m.predict_proba(Xo.iloc[i_va])
+                val = tabpfn_predict(m, Xo.iloc[i_va], self.task)
             if np.asarray(val).size != r_val.size:
                 continue
             ws = np.linspace(0, 1, 21)
@@ -263,7 +263,7 @@ class TabLoRAStack:
                 Xn, _ = design(F[ctx.columns], None)
                 Xo_tr, Xo = _ordinal(Xc, Xn, cats)
                 m = fit_tabpfn(Xo_tr, self.context["__y__"].to_numpy(), cats, self.task, seed=self.seed)
-                out = m.predict(Xo) if self.task == "regression" else m.predict_proba(Xo)
+                out = tabpfn_predict(m, Xo, self.task)
             parts[head] = w * np.asarray(out).reshape(reader.shape) + (1 - w) * reader
         blends = [parts[h] for h in self.weights] or [reader]
         out = np.mean(blends, axis=0)

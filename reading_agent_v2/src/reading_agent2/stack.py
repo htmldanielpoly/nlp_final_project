@@ -174,6 +174,25 @@ def fit_tabpfn(X_tr, y_tr, cats, task, seed):
     return m
 
 
+def tabpfn_predict(m, X, task, chunk=256):
+    """TabPFN predictions in row chunks (each test row is conditioned only on the context, so chunking does not
+    change them); on GPU OOM (the GPU is shared with stage-B training) halve the chunk, or wait and retry."""
+    pred = m.predict if task == "regression" else m.predict_proba
+    for _ in range(12):
+        try:
+            return np.concatenate([np.asarray(pred(X.iloc[i:i + chunk])) for i in range(0, len(X), chunk)])
+        except Exception as e:  # tabpfn.errors.TabPFNCUDAOutOfMemoryError / torch.OutOfMemoryError
+            if "out of memory" not in str(e).lower():
+                raise
+            torch.cuda.empty_cache()
+            if chunk > 32:
+                chunk //= 2
+            else:
+                time.sleep(120)
+            print(f"  TabPFN OOM; retrying with chunk {chunk}", flush=True)
+    raise RuntimeError("TabPFN kept running out of GPU memory")
+
+
 def _ordinal(X_tr, X_te, cats):
     """TabPFN needs numeric input: ordinal-encode categoricals with the training-row vocabulary."""
     X_tr, X_te = X_tr.copy(), X_te.copy()
@@ -236,11 +255,10 @@ def heads(dataset, fold, which=("tabm", "tabpfn"), tag="v2", features=("stack", 
                 fitted[head] = m
             return tabm_predict(m, Xi_te, task), tabm_predict(m, Xi_tr.iloc[i_va], task)
         Xo_tr, Xo_te = _ordinal(X_tr, X_te, cats)
-        pred = (lambda mm, X: mm.predict(X)) if task == "regression" else (lambda mm, X: mm.predict_proba(X))
-        out = pred(fit_tabpfn(Xo_tr, y_tr, cats, task, seed=fold), Xo_te)
+        out = tabpfn_predict(fit_tabpfn(Xo_tr, y_tr, cats, task, seed=fold), Xo_te, task)
         val = None
         if want_val:  # TabPFN conditions on all training rows; validation predictions need an inner fit
-            val = pred(fit_tabpfn(Xo_tr.iloc[i_in], y_tr[i_in], cats, task, seed=fold), Xo_tr.iloc[i_va])
+            val = tabpfn_predict(fit_tabpfn(Xo_tr.iloc[i_in], y_tr[i_in], cats, task, seed=fold), Xo_tr.iloc[i_va], task)
         return out, val
 
     for feat, r in readers.items():
