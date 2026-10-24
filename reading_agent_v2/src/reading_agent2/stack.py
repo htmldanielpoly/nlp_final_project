@@ -175,22 +175,23 @@ def fit_tabpfn(X_tr, y_tr, cats, task, seed):
 
 
 def tabpfn_predict(m, X, task):
-    """TabPFN predictions; on GPU OOM (the GPU is shared with stage-B training) predict in row chunks, halving
-    them down to 128 rows, then wait and retry. Each test row is conditioned only on the context, so chunking does
-    not change the predictions, but every chunk re-encodes the context, so chunks are used only when needed."""
+    """TabPFN predictions. On GPU OOM (memory held by another job) first wait and retry; then predict in row
+    chunks, halving down to 1/8 of the rows (at least 512). Each test row is conditioned only on the context, so
+    chunking does not change the predictions, but every chunk re-encodes the context, hence the floor."""
     pred = m.predict if task == "regression" else m.predict_proba
-    chunk = len(X)
-    for _ in range(16):
+    chunk, floor, waits = len(X), min(len(X), max(512, len(X) // 8)), 0
+    for _ in range(20):
         try:
             return np.concatenate([np.asarray(pred(X.iloc[i:i + chunk])) for i in range(0, len(X), chunk)])
         except Exception as e:  # tabpfn.errors.TabPFNCUDAOutOfMemoryError / torch.OutOfMemoryError
             if "out of memory" not in str(e).lower():
                 raise
             torch.cuda.empty_cache()
-            if chunk > 128:
-                chunk = max(128, chunk // 2)
+            if waits < 3 or chunk <= floor:
+                waits += 1
+                time.sleep(90)
             else:
-                time.sleep(120)
+                chunk = max(floor, chunk // 2)
             print(f"  TabPFN OOM; retrying with chunk {chunk}", flush=True)
     raise RuntimeError("TabPFN kept running out of GPU memory")
 
