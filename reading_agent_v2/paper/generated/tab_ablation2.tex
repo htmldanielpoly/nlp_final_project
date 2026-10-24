@@ -4,12 +4,12 @@
 \cmidrule(lr){2-4}\cmidrule(lr){5-7}
 Comparison (left $-$ right) & $\Delta$ & wins & $p$ & $\Delta$ & wins & $p$ \\
 \midrule
-TabLoRA vs.\ frozen-E5 items, reader alone & +0.011 & 9/10 & 0.004 & +0.034 & 3/3 & -- \\
-TabLoRA vs.\ frozen-E5 items, final system & +0.006 & 9/10 & 0.064 & +0.001 & 1/3 & -- \\
-Table gate vs.\ plain LoRA, reader (fold 0) & -- & -- & -- & -- & -- & -- \\
-Adding the reader to TabM Frozen & +0.012 & 9/10 & 0.037 & +0.007 & 3/3 & -- \\
-Adding the reader to TabPFN-2.5 Frozen & +0.013 & 5/8 & 0.094 & +0.001 & 2/3 & -- \\
-Blend vs.\ stacking (TabM) & 0.000 & 3/10 & 0.432 & +0.001 & 1/3 & -- \\
-Two heads vs.\ TabM only & +0.003 & 7/10 & 0.016 & +0.018 & 3/3 & -- \\
+TabLoRA vs.\ frozen-E5 items, reader alone & +0.013 & 10/10 & 0.002 & +0.021 & 9/10 & 0.020 \\
+TabLoRA vs.\ frozen-E5 items, final system & +0.007 & 10/10 & 0.002 & +0.001 & 9/10 & 0.049 \\
+Table gate vs.\ plain LoRA, reader (fold 0) & $-$0.001 & 5/10 & 0.625 & $-$0.005 & 6/10 & 0.770 \\
+Adding the reader to TabM Frozen & +0.015 & 10/10 & 0.002 & +0.009 & 9/10 & 0.004 \\
+Adding the reader to TabPFN-2.5 Frozen & +0.013 & 7/8 & 0.016 & +0.005 & 8/10 & 0.010 \\
+Blend vs.\ stacking (TabM) & +0.002 & 6/10 & 0.322 & +0.009 & 7/10 & 0.275 \\
+Two heads vs.\ TabM only & +0.003 & 8/10 & 0.008 & +0.014 & 9/10 & 0.004 \\
 \bottomrule
 \end{tabular}

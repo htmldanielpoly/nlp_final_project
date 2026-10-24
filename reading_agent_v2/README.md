@@ -83,4 +83,19 @@ python -m unittest discover -s tests -v
 
 ## Results
 
-See `paper/main.pdf` (Tables 1-2, Appendix A) and `MODEL_CARD.md`.
+Dataset means over 5 folds, 10 classification (AUROC) and 10 regression (R²) datasets:
+
+| | AUROC | R² |
+|---|---|---|
+| **v2** (`blend_mean@stackB`) | **0.913** | **0.738** |
+| v1 Blend (CatBoost Frozen + reader) | 0.900 | 0.702 |
+| TabM, Joint Frozen (local, same rows) | 0.895 | 0.716 |
+| TabM, Joint TAR (MulTaBench leaderboard) | 0.911 | 0.728 |
+
+v2 beats v1 on 9/10 classification and 10/10 regression datasets (Wilcoxon p = 0.004 / 0.002).
+Per-dataset and per-fold scores: `evaluation/`. Full tables: `paper/main.pdf` (Tables 1-2,
+Appendix A) and `MODEL_CARD.md`.
+
+No test leakage: every reader, adapter, preprocessing step, head and blend weight is fit per
+dataset and split on that split's training rows only (cross-fitting keeps the reader's
+training-row predictions out-of-fold).

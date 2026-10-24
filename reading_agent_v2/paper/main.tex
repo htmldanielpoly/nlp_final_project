@@ -38,7 +38,7 @@ Text-tabular models embed every text field of a row with an encoder that ignores
 We make reading \emph{table-conditioned} at two levels.
 A table encoder initialises a recurrent \emph{anytime} reader that consumes field-tagged sentence items one at a time, and an expected-gain head, adapted from dynamic feature selection, decides which items to read; \emph{TabLoRA}, a low-rank adapter in E5's top layers whose rank space is gated per row by the table encoding, changes how each item is encoded.
 On all 20 MulTaBench text datasets (five splits each), learned reading beats a random reader with the same per-row budget at every budget we test (\gainContentTenClsDelta{} AUROC and \gainContentTenRegDelta{} $R^2$ at a nominal 10\% of the items).
-For full accuracy, cross-fitted TabLoRA readers blended with Joint-Frozen TabM and TabPFN-2.5 reach \oursCls{} AUROC and \oursReg{} $R^2$, significantly above our earlier CatBoost blend (\oursVsVoneClsDelta{} AUROC, \oursVsVoneRegDelta{} $R^2$) and the local Joint-Frozen learners on identical rows, and at the level of the MulTaBench Joint TAR references (TabM TAR: \tabmTarCls{} and \tabmTarReg).
+For full accuracy, cross-fitted TabLoRA readers blended with Joint-Frozen TabM and TabPFN-2.5 reach \oursCls{} AUROC and \oursReg{} $R^2$, significantly above our earlier CatBoost blend (\oursVsVoneClsDelta{} AUROC, \oursVsVoneRegDelta{} $R^2$) and Joint-Frozen TabM on identical rows, and at the level of the MulTaBench Joint TAR references (TabM TAR: \tabmTarCls{} and \tabmTarReg).
 \end{abstract}
 
 %======================================================================
@@ -126,8 +126,6 @@ with $n\le K$ the row's items and $\ell$ cross-entropy (classification) or MSE o
 With the reader frozen, a head $\hat g(s_t,k_i)=\mathrm{MLP}([s_t;k_i])$ regresses the observed gain of reading item $i$ next, $\Delta_i(s_t)=\ell(f(s_t),y)-\ell(f(s_t\oplus c_i),y)$, over all unread items at states visited by an $\varepsilon$-greedy roll-in on held-out rows (DAgger style~\cite{ross2011dagger}).
 \emph{Content} keys are $k_i=c_i$; \emph{metadata} keys use only field and position, so unread content is not inspected.
 At inference the head needs no label: read $\arg\max_i\hat g$ while $\max_i\hat g\ge\lambda$, with $\lambda$ bisected on validation rows for a target fraction of items.
-A pointer network imitating a label-aware greedy oracle was no better than random in pilots, plausibly because the oracle's choices depend on $y$.
-
 \textbf{TabLoRA.}
 Joint TAR tunes E5 to the target but encodes a sentence the same way in every row.
 We add LoRA adapters ($r=16$, $\alpha=32$) to the query, key, value, attention-output and both feed-forward maps of E5's last three layers (MulTaBench's TAR placement) and gate their rank space with the row's table encoding:
@@ -151,7 +149,8 @@ As in MulTaBench, TabPFN is not used beyond 10 classes (Spotify, Wine), where Ta
 \paragraph{Setup.}
 We use all 20 MulTaBench text datasets (10 classification: binary or macro one-vs-rest AUROC; 10 regression: $R^2$) under the paper protocol: random holdout splits (seed $42+$fold, test $\le$2{,}000 and train $\le$10{,}000 rows) ported from the official code, five splits per dataset, on pinned dataset revisions.
 The reader uses one configuration everywhere ($d=128$, dropout 0.2, AdamW lr $10^{-3}$, 100 epochs, patience 15 on an inner split); TabLoRA's settings were chosen on inner-validation loss of one pilot (Jigsaw, fold 0).
-TabM and TabPFN-2.5 run with their default settings (TabM early-stops on the same 20\% split).
+TabM and TabPFN-2.5 run with their default settings (TabM early-stops on the same 20\% split); TabPFN-2.5's default classifier is also fine-tuned on 43 real datasets, none of them a MulTaBench dataset by name~\cite{grinsztajn2025tabpfn25}.
+Every model, preprocessing step and blend weight is fit per dataset and split on its training rows only.
 Local baselines are run on our exact rows; external references are the official leaderboard scores for the same split seeds (row identity unverified, so no significance test against them).
 Following Dem\v{s}ar~\cite{demsar2006statistical}, folds are averaged per dataset and two-sided Wilcoxon signed-rank tests run over datasets, separately for AUROC and $R^2$.
 Training used one T4 GPU (TabLoRA: \loraMinutes{} min per dataset split for all three readers).
@@ -167,7 +166,8 @@ $^{\dagger n}$: available for $n$ datasets only; [ ]: Ours on those $n$.}
 \end{table}
 
 \paragraph{Full-budget accuracy (Table~\ref{tab:main}).}
-Our model improves on every local baseline on both task families: on our previous CatBoost blend by \oursVsVoneClsDelta{} AUROC (\oursVsVoneClsWins/\oursVsVoneClsN{} datasets, $p=\oursVsVoneClsP$) and \oursVsVoneRegDelta{} $R^2$ (\oursVsVoneRegWins/\oursVsVoneRegN, $p=\oursVsVoneRegP$), and on Joint-Frozen TabM by \oursVsTabMClsDelta{} AUROC ($p=\oursVsTabMClsP$) and \oursVsTabMRegDelta{} $R^2$ ($p=\oursVsTabMRegP$).
+Our model improves on our previous CatBoost blend by \oursVsVoneClsDelta{} AUROC (\oursVsVoneClsWins/\oursVsVoneClsN{} datasets, $p=\oursVsVoneClsP$) and \oursVsVoneRegDelta{} $R^2$ (\oursVsVoneRegWins/\oursVsVoneRegN, $p=\oursVsVoneRegP$), also on folds 1--4 alone, which no pilot used (\noPilotVsVoneClsDelta, \noPilotVsVoneRegDelta), and on Joint-Frozen TabM by \oursVsTabMClsDelta{} AUROC ($p=\oursVsTabMClsP$) and \oursVsTabMRegDelta{} $R^2$ ($p=\oursVsTabMRegP$).
+Over TabPFN-2.5 Frozen, the strongest local learner, the gain (\oursVsPFNClsDelta, \oursVsPFNRegDelta) is not significant.
 Against the Joint TAR references, which fine-tune E5 on the target, it is level with TabM TAR on classification (\oursVsLbTabMTarClsDelta, \oursVsLbTabMTarClsWins/\oursVsLbTabMTarClsN{} wins) and ahead on regression (\oursVsLbTabMTarRegDelta, \oursVsLbTabMTarRegWins/\oursVsLbTabMTarRegN), and \oursVsLbBestTarClsDelta{} AUROC and \oursVsLbBestTarRegDelta{} $R^2$ from the per-dataset best of the four TAR learners (Appendix~\ref{app:per}).
 
 \begin{table}[t]
@@ -181,9 +181,10 @@ Against the Joint TAR references, which fine-tune E5 on the target, it is level 
 
 \paragraph{Ablations (Table~\ref{tab:abl}).}
 TabLoRA makes the reader itself better (\loraReaderClsDelta{} AUROC, \loraReaderClsWins/\loraReaderClsN{} datasets; \loraReaderRegDelta{} $R^2$, \loraReaderRegWins/\loraReaderRegN), largest where the text carries the signal (Jigsaw \sJigsawToxicityR{}$\to$\sJigsawToxicityRLora{} AUROC).
-After blending with the learners, part of this gain is absorbed (\loraSystemClsDelta{} and \loraSystemRegDelta), because the learners already see the frozen text embeddings.
+After blending, half of this gain remains on classification (\loraSystemClsDelta) and almost none on regression (\loraSystemRegDelta), because the learners already see the frozen text embeddings.
+The gain comes from the adapters, not the table gate: on fold 0, gated and plain LoRA readers are level (\gateClsDelta{} AUROC, \gateRegDelta{} $R^2$, both n.s.).
 The reader adds to both learners, and the two blends are better than either alone: their errors differ.
-Blending and stacking the reader's predictions as features into TabM perform alike, so we keep the simpler blend.
+Stacking the reader's predictions into TabM is no better than the simpler blend.
 
 \begin{table}[t]
 \caption{Selective reading (frozen-item reader): gain policy minus a random reader with the same per-row number of reads, per nominal budget. ``read'': achieved test fraction; $p_{\text{Holm}}$: Wilcoxon $p$, Holm-adjusted~\cite{holm1979} over the 8 key$\times$budget cells per family.}
@@ -195,7 +196,6 @@ Blending and stacking the reader's predictions as features into TabM perform ali
 \end{table}
 
 \paragraph{Selective reading (Table~\ref{tab:budget}).}
-These experiments use the reader with frozen items.
 At 10\% of the items the content policy beats the matched random reader by \gainContentTenClsDelta{} AUROC (\gainContentTenClsWins/10 datasets) and \gainContentTenRegDelta{} $R^2$ (\gainContentTenRegWins/10); all 16 key$\times$budget comparisons are significant after Holm correction, and metadata keys, which never see unread content, also win at every budget.
 Against random items with the same \emph{total} reads spread over rows (Appendix~\ref{app:ctl}), the 10\% gap widens to \ctlTotalContentTenClsDelta{} AUROC: choosing \emph{which rows} to read matters as much as which items.
 At 10\% of the items the policy recovers a median \recContentTen{} of what reading everything adds over the table alone (random: \recRandomContentTen).
@@ -204,8 +204,8 @@ At 10\% of the items the policy recovers a median \recContentTen{} of what readi
 \section{Conclusion}
 
 Conditioning text reading on the table helps at both levels we tried: what to read (a label-free gain policy beats budget-matched random reading at every budget) and how to read it (TabLoRA improves the reader).
-Cross-fitted and blended with Joint-Frozen TabM and TabPFN-2.5, the reader significantly improves on all local baselines and reaches the Joint TAR references without fine-tuning E5 on the learners' side.
-\textbf{Limitations:} TabLoRA's gain shrinks once strong learners are added; the selective-reading results use the frozen-item reader; all items are embedded before selection, so the read fraction is not a compute saving; the $K$-item cap drops long text (Zomato); TabPFN needs its training rows at inference.
+Cross-fitted and blended with Joint-Frozen TabM and TabPFN-2.5, the reader significantly improves on the CatBoost and TabM baselines and reaches the Joint TAR references without fine-tuning E5 on the learners' side.
+\textbf{Limitations:} TabLoRA's gain shrinks once strong learners are added, and its table gate added nothing over plain LoRA; the selective-reading results use the frozen-item reader; all items are embedded before selection, so the read fraction is not a compute saving; the $K$-item cap drops long text (Zomato); TabPFN needs its training rows at inference.
 \textbf{Future work:} TAR-tuned frozen frames for the learners, lazy encoding of selected items only, and a multi-step gain policy.
 
 \bibliographystyle{plain}

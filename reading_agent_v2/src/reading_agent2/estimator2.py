@@ -414,7 +414,7 @@ def publish(repo, tag="v2", private=True):
     shutil.copyfile(ROOT / "MODEL_CARD.md", root / "README.md")
     code = root / "code"
     shutil.rmtree(code, ignore_errors=True)
-    for name in ("src", "tests", "scripts", "reference"):
+    for name in ("src", "tests", "scripts", "reference", "evaluation"):
         shutil.copytree(ROOT / name, code / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     for name in ("pyproject.toml", "uv.lock", "README.md", ".python-version"):
         if (ROOT / name).exists():

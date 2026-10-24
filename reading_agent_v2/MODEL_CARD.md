@@ -71,7 +71,28 @@ weights reproduce the scores closely, not exactly.
 
 ## Evaluation
 
-RESULTS_TABLE
+MulTaBench paper protocol: 20 text datasets x 5 random holdout splits (seed 42+fold), dataset means
+over folds, then means over the 10 classification (AUROC) and 10 regression (R^2) datasets.
+Local rows are run on exactly the test rows of these artifacts; p: two-sided Wilcoxon signed-rank
+test of Ours against that row over datasets.
+
+| Method | AUROC | Ours wins (p) | R^2 | Ours wins (p) |
+|---|---|---|---|---|
+| **Ours** (mean of the two blends, this repo) | **0.913** | | **0.738** | |
+| TabM Frozen + TabLoRA reader | 0.910 | 8/10 (0.008) | 0.724 | 9/10 (0.004) |
+| TabPFN-2.5 Frozen + TabLoRA reader | 0.897 (8 datasets) | 4/8 | 0.734 | 4/10 |
+| TabLoRA reader alone | 0.903 | 10/10 (0.002) | 0.672 | 10/10 (0.002) |
+| v1 Blend (CatBoost Frozen + frozen-item reader) | 0.900 | 9/10 (0.004) | 0.702 | 10/10 (0.002) |
+| CatBoost, Joint Frozen (local) | 0.887 | 10/10 (0.002) | 0.684 | 10/10 (0.002) |
+| TabM, Joint Frozen (local) | 0.895 | 10/10 (0.002) | 0.716 | 10/10 (0.002) |
+| TabPFN-2.5, Joint Frozen (local) | 0.884 (8 datasets) | 6/8 (0.148) | 0.729 | 5/10 (0.375) |
+| CatBoost, Joint TAR (leaderboard) | 0.907 | 9/10 | 0.716 | 9/10 |
+| TabM, Joint TAR (leaderboard) | 0.911 | 5/10 | 0.728 | 9/10 |
+| TabPFN-2.5, Joint TAR (leaderboard) | 0.900 (8 datasets) | 3/8 | 0.732 | 4/10 |
+
+TabPFN-2.5 is not used beyond 10 classes (Spotify, Wine). Per-dataset and per-fold scores:
+`code/evaluation/scores_per_dataset.csv`, `code/evaluation/scores_per_fold.csv`; the per-run test
+score is also in `index.json`.
 
 External leaderboard values use the same split seeds, but row identity with the original data
 is not verified, so no significance test is claimed against them.
@@ -81,5 +102,11 @@ is not verified, so no significance test is claimed against them.
 - Per-dataset models: each artifact is trained for one dataset and split; for new data use
   `TabLoRAStack.fit` (see the GitHub README).
 - TabPFN-2.5 needs its training rows (stored here as the frozen-frame context) at inference.
+- No test leakage: every reader, adapter, preprocessing step, head and blend weight is fit per
+  dataset and split on that split's training rows only. Pretrained parts: E5-small-v2 (generic
+  web text) and TabPFN-2.5, whose default *classifier* checkpoint is additionally fine-tuned on 43
+  real datasets (TabPFN-2.5 report, App. C.1), none of them a MulTaBench dataset by name.
+- The per-row table gate of TabLoRA was level with plain LoRA in our fold-0 ablation; the gain
+  over frozen items comes from the adapters.
 - Items are truncated at 128 tokens for TabLoRA, and at most `K = max(8, #fields)` items per row
   are kept, so very long texts are only partly read.
