@@ -107,7 +107,7 @@ Skim readers~\cite{yu2017skim,seo2018skimrnn,graves2016act} skip tokens or steps
 \end{figure}
 
 \textbf{Text items.}
-Each text field is split into sentences, merged or cut into chunks of at most 48 words (a field's chunks beyond the eighth merge into one tail item).
+Each text field is split into sentences, merged or cut into chunks of at most 48 words (chunks beyond the eighth merge into one).
 Items are allocated round-robin across fields up to $K=\max(8,\#\text{fields})$ per row, so every field has at least one item; the kept items contain every word of the row on 13 of the 20 datasets (Appendix~\ref{app:cov}).
 Each item is verbalised as \texttt{passage: <column>: <chunk>} and embedded with E5-small-v2~\cite{wang2022e5} ($e_i\in\mathbb{R}^{384}$); inside the model it becomes
 $c_i=\mathrm{LN}(W_{\text{item}}e_i + W_{\text{name}}\,\mathrm{E5}(\text{field name}) + p_{\text{pos}(i)})\in\mathbb{R}^{128}$.
@@ -126,6 +126,7 @@ with $n\le K$ the row's items and $\ell$ cross-entropy (classification) or MSE o
 With the reader frozen, a head $\hat g(s_t,k_i)=\mathrm{MLP}([s_t;k_i])$ regresses the observed gain of reading item $i$ next, $\Delta_i(s_t)=\ell(f(s_t),y)-\ell(f(s_t\oplus c_i),y)$, over all unread items at states visited by an $\varepsilon$-greedy roll-in on held-out rows (DAgger style~\cite{ross2011dagger}).
 \emph{Content} keys are $k_i=c_i$; \emph{metadata} keys use only field and position, so unread content is not inspected.
 At inference the head needs no label: read $\arg\max_i\hat g$ while $\max_i\hat g\ge\lambda$, with $\lambda$ bisected on validation rows for a target fraction of items.
+
 \textbf{TabLoRA.}
 Joint TAR tunes E5 to the target but encodes a sentence the same way in every row.
 We add LoRA adapters ($r=16$, $\alpha=32$) to the query, key, value, attention-output and both feed-forward maps of E5's last three layers (MulTaBench's TAR placement) and gate their rank space with the row's table encoding:
@@ -134,7 +135,7 @@ W x\ \mapsto\ W x+\tfrac{\alpha}{r}\,B\,\mathrm{diag}\big(1+\tanh(G_W\,\htab)\bi
 \end{equation}
 with $B$ and every $G_W$ initialised at zero, so training starts from frozen E5 and from plain LoRA.
 Training has two phases: the reader is fit with frozen items (as above), then the adapters and gates are trained through $\mathcal{L}_{\text{read}}$ with the reader fixed (lr $10^{-3}$, batch 64, at most 10 epochs, patience 3, fp16).
-Hidden states entering layer 10 are cached once per item (truncated at 128 tokens), so each step runs only the top three layers.
+Items are truncated at 128 tokens and their layer-10 inputs cached.
 
 \textbf{Cross-fitted reader signals and heads.}
 For full-budget accuracy we pair the reader with tabular learners on the Joint-Frozen frame (structured columns + PCA-30 of each field's whole-text E5 embedding).
@@ -144,13 +145,14 @@ The final prediction is the unweighted mean of the two blends; this choice and a
 As in MulTaBench, TabPFN is not used beyond 10 classes (Spotify, Wine), where TabM's blend is used alone.
 
 %======================================================================
-\section{Experiments}
+\section{Experiments and Results}
 
 \paragraph{Setup.}
 We use all 20 MulTaBench text datasets (10 classification: binary or macro one-vs-rest AUROC; 10 regression: $R^2$) under the paper protocol: random holdout splits (seed $42+$fold, test $\le$2{,}000 and train $\le$10{,}000 rows) ported from the official code, five splits per dataset, on pinned dataset revisions.
 The reader uses one configuration everywhere ($d=128$, dropout 0.2, AdamW lr $10^{-3}$, 100 epochs, patience 15 on an inner split); TabLoRA's settings were chosen on inner-validation loss of one pilot (Jigsaw, fold 0).
 TabM and TabPFN-2.5 run with their default settings (TabM early-stops on the same 20\% split); TabPFN-2.5's default classifier is also fine-tuned on 43 real datasets, none of them a MulTaBench dataset by name~\cite{grinsztajn2025tabpfn25}.
-Every model, preprocessing step and blend weight is fit per dataset and split on its training rows only.
+All fitting uses only the training rows of each dataset and split.
+TabLoRA tunes E5 on the target, so our model is target-aware and Joint TAR is its reference baseline.
 Local baselines are run on our exact rows; external references are the official leaderboard scores for the same split seeds (row identity unverified, so no significance test against them).
 Following Dem\v{s}ar~\cite{demsar2006statistical}, folds are averaged per dataset and two-sided Wilcoxon signed-rank tests run over datasets, separately for AUROC and $R^2$.
 Training used one T4 GPU (TabLoRA: \loraMinutes{} min per dataset split for all three readers).
@@ -205,14 +207,15 @@ At 10\% of the items the policy recovers a median \recContentTen{} of what readi
 
 Conditioning text reading on the table helps at both levels we tried: what to read (a label-free gain policy beats budget-matched random reading at every budget) and how to read it (TabLoRA improves the reader).
 Cross-fitted and blended with Joint-Frozen TabM and TabPFN-2.5, the reader significantly improves on the CatBoost and TabM baselines and reaches the Joint TAR references without fine-tuning E5 on the learners' side.
-\textbf{Limitations:} TabLoRA's gain shrinks once strong learners are added, and its table gate added nothing over plain LoRA; the selective-reading results use the frozen-item reader; all items are embedded before selection, so the read fraction is not a compute saving; the $K$-item cap drops long text (Zomato); TabPFN needs its training rows at inference.
-\textbf{Future work:} TAR-tuned frozen frames for the learners, lazy encoding of selected items only, and a multi-step gain policy.
+\textbf{Limitations:} TabLoRA's gain shrinks once strong learners are added, and its table gate added nothing over plain LoRA; the selective-reading results use the frozen-item reader; all items are embedded before selection, so the read fraction is not a compute saving; the $K$-item cap drops long text (Zomato).
+\textbf{Future work:} TAR-tuned frames for the learners, lazy item encoding, a multi-step gain policy.
 
 \bibliographystyle{plain}
 \bibliography{references}
 
 \appendix
 \makeatletter\setlength{\@fptop}{0pt}\setlength{\@fpsep}{12pt plus 1fil}\makeatother % top-align appendix float pages
+\clearpage
 \section{Per-dataset results}\label{app:per}
 \begin{table}[h]
 \caption{Fold-mean scores per dataset. v1: CatBoost Frozen + frozen-item reader blend; TabM, PFN: Joint-Frozen learners on our rows; R / R$_{\text{LoRA}}$: cross-fitted reader with frozen / TabLoRA items; Ours $\pm$ fold std. LB: MulTaBench leaderboard (TabM TAR and the best of four TAR learners) for matching split seeds. Bold: best of our columns.}
